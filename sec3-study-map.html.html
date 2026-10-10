@@ -346,20 +346,27 @@ try{bank=JSON.parse(localStorage.getItem(BK)||'{}')}catch(e){bank={}}
 function saveBank(){try{localStorage.setItem(BK,JSON.stringify(bank))}catch(e){toast('Storage is full, so the questions could not be saved.')}}
 function getGK(){var k='',m='';try{k=localStorage.getItem(GK)||'';m=localStorage.getItem(GK+'-m')||''}catch(e){}return{k:k||ui.gk||'',m:m||ui.gm||''}}
 function setGK(k,m){ui.gk=k;ui.gm=m;try{localStorage.setItem(GK,k);localStorage.setItem(GK+'-m',m);return true}catch(e){return false}}
+function cleanModel(m){m=String(m||'').trim().replace(/^models\//,'');return/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(m)?m:'gemini-flash-latest'}
 function gem(prompt){
-  var c=getGK(),key=c.k,model=c.m||'gemini-2.5-flash';
+  var c=getGK(),key=c.k;
   if(!key)return Promise.reject(new Error('No Gemini API key saved yet. Tap the 🔑 AI key button at the top.'));
-  var url='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent',
+  var first=cleanModel(c.m),list=[first].concat(['gemini-flash-latest','gemini-2.5-flash','gemini-2.0-flash'].filter(function(x){return x!==first})),i=0,
   body=JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',temperature:0.4}}),
   go=function(u,h){return fetch(u,{method:'POST',headers:h,body:body})};
-  return go(url,{'Content-Type':'application/json','x-goog-api-key':key})
-  .catch(function(){return go(url+'?key='+encodeURIComponent(key),{'Content-Type':'application/json'})})
-  .catch(function(e){throw new Error('Could not reach Google ('+((e&&e.message)||'network error')+'). A school or work network, a VPN, or an ad blocker may be blocking generativelanguage.googleapis.com.')})
-  .then(function(r){return r.json().then(function(j){
-    if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
-    var cd=j.candidates&&j.candidates[0];
-    if(!cd||!cd.content)throw new Error('Google returned no answer'+(j.promptFeedback&&j.promptFeedback.blockReason?' ('+j.promptFeedback.blockReason+')':'')+'. Try again.');
-    return JSON.parse(cd.content.parts[0].text.replace(/```json|```/g,''))})});
+  function one(model){
+    var url='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent';
+    return go(url,{'Content-Type':'application/json','x-goog-api-key':key})
+    .catch(function(){return go(url+'?key='+encodeURIComponent(key),{'Content-Type':'application/json'})})
+    .catch(function(e){throw new Error('Could not reach Google ('+((e&&e.message)||'network error')+'). A school or work network, a VPN, or an ad blocker may be blocking generativelanguage.googleapis.com.')})
+    .then(function(r){return r.json().then(function(j){
+      if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
+      var cd=j.candidates&&j.candidates[0];
+      if(!cd||!cd.content)throw new Error('Google returned no answer'+(j.promptFeedback&&j.promptFeedback.blockReason?' ('+j.promptFeedback.blockReason+')':'')+'. Try again.');
+      return JSON.parse(cd.content.parts[0].text.replace(/```json|```/g,''))})});
+  }
+  function next(){return one(list[i]).then(function(r){if(list[i]!==c.m)setGK(key,list[i]);return r},function(e){
+    if(i<list.length-1&&/model|not found|not supported|404/i.test(String(e.message))&&!/Could not reach/.test(String(e.message))){i++;return next()}throw e})}
+  return next();
 }
 
 function ctx(id){return'Singapore Sec 3 G3 '+subj(id.split('-')[0]).name+', topic "'+findTopic(id).name+'"'}
@@ -554,7 +561,7 @@ time:function(){
     (rows?'<h3 style="margin-top:26px">Recent sessions</h3><ul class="list">'+rows+'</ul>':'');
 },
 marker:function(){
-  var m=ui.mk=ui.mk||{},c=getGK(),key=c.k,mod=m.model||c.m||'gemini-2.5-flash';
+  var m=ui.mk=ui.mk||{},c=getGK(),key=c.k,mod=m.model||cleanModel(c.m);
   var types=[['English: Situational writing (30 marks)','English situational writing (email, letter or report)|30'],['English: Continuous writing (40 marks)','English continuous writing (narrative, descriptive, expository or argumentative)|40'],['Chinese 应用文 (20 marks)','Chinese 应用文 functional writing|20'],['Chinese 作文 (40 marks)','Chinese 作文 composition|40']];
   var opts=types.map(function(t){return'<option value="'+esc(t[1])+'"'+(m.type===t[1]?' selected':'')+'>'+esc(t[0])+'</option>'}).join('');
   var r=m.res,out='';
@@ -637,15 +644,15 @@ var actions={
     if(t===null||t===undefined){o.textContent='No pop-up appeared or it was cancelled. If you are viewing this inside a preview window, open the file in Chrome or Safari instead.';return}
     t=t.trim();if(!t)return;document.getElementById('mk-key').value=t;setGK(t,document.getElementById('mk-model').value.trim());o.textContent='Key saved. Now tap Save and test key.'},
   keysheet:function(){var c=getGK();
-    document.getElementById('sheet').innerHTML='<div class="sheet"><div class="card" role="dialog" aria-label="Gemini API key"><h3>Gemini API key</h3><p class="note" style="margin-top:6px">Get a free key at aistudio.google.com. It is saved only in this browser.</p><label style="margin-top:12px">Key<input id="sk-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your key here" value="'+esc(c.k)+'"></label><label style="margin-top:10px">Model<input id="sk-model" value="'+esc(c.m||'gemini-2.5-flash')+'"></label><p id="sk-msg" class="note" role="status">'+(c.k?'A key is saved on this device.':'No key saved yet.')+'</p><div class="btnrow"><button class="btn" data-a="skgo">Save and test</button><button class="btn alt" data-a="closesheet">Close</button></div></div></div>';
+    document.getElementById('sheet').innerHTML='<div class="sheet"><div class="card" role="dialog" aria-label="Gemini API key"><h3>Gemini API key</h3><p class="note" style="margin-top:6px">Get a free key at aistudio.google.com. It is saved only in this browser.</p><label style="margin-top:12px">Key<input id="sk-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your key here" value="'+esc(c.k)+'"></label><label style="margin-top:10px">Model<input id="sk-model" value="'+esc(cleanModel(c.m))+'"></label><p id="sk-msg" class="note" role="status">'+(c.k?'A key is saved on this device.':'No key saved yet.')+'</p><div class="btnrow"><button class="btn" data-a="skgo">Save and test</button><button class="btn alt" data-a="closesheet">Close</button></div></div></div>';
     document.getElementById('sk-key').focus()},
-  skgo:function(){var k=document.getElementById('sk-key').value.trim(),m=document.getElementById('sk-model').value.trim()||'gemini-2.5-flash',o=document.getElementById('sk-msg');
+  skgo:function(){var k=document.getElementById('sk-key').value.trim(),m=cleanModel(document.getElementById('sk-model').value),o=document.getElementById('sk-msg');
     if(!k){o.textContent='Paste your key into the box first.';return}
     var ok=setGK(k,m);o.textContent='Testing…';
     gem('Reply with this JSON only: {"ok":true}').then(function(){var x=document.getElementById('sk-msg');if(x)x.textContent='Key saved and working. You can close this.'+(ok?'':' (This browser blocks storage, so it is only kept until you close the page.)')})
     .catch(function(e){var x=document.getElementById('sk-msg');if(x)x.textContent='Key saved, but the test failed: '+String(e.message||e)})},
   testkey:function(){
-    var k=document.getElementById('mk-key').value.trim(),m=document.getElementById('mk-model').value.trim()||'gemini-2.5-flash',o=document.getElementById('keymsg');
+    var k=document.getElementById('mk-key').value.trim(),m=cleanModel(document.getElementById('mk-model').value),o=document.getElementById('keymsg');
     if(!k){o.textContent='Paste your key into the box first.';return}
     var ok=setGK(k,m);o.textContent='Testing…';
     gem('Reply with this JSON only: {"ok":true}').then(function(){o.textContent='Key works.'+(ok?' It is saved on this device.':' This browser is blocking storage, so it is only kept until you close the page.')})
@@ -692,7 +699,7 @@ var actions={
   calc:function(){var c=document.getElementById('calc');c.hidden=!c.hidden;if(!c.hidden&&!c.style.left){c.style.left=Math.max(8,innerWidth-280)+'px';c.style.top='90px'}},
   mark:function(){
     var g=function(i){return document.getElementById(i).value.trim()};
-    var essay=g('mk-essay'),key=g('mk-key'),model=g('mk-model')||'gemini-2.5-flash',ty=g('mk-type'),tk=g('mk-task'),o=ty.split('|');
+    var essay=g('mk-essay'),key=g('mk-key'),model=cleanModel(g('mk-model')),ty=g('mk-type'),tk=g('mk-task'),o=ty.split('|');
     ui.mk={task:tk,essay:essay,type:ty,model:model};
     if(key)setGK(key,model);
     if(!key&&!getGK().k){toast('Add your Gemini API key first.');return}
