@@ -146,6 +146,7 @@ input[type=range]{padding:0;border:0;background:none}
     <button data-a="tab" data-t="scores">Test scores</button>
     <button data-a="tab" data-t="time">Study time</button>
     <button data-a="tab" data-t="backup">Backup</button>
+    <button data-a="keysheet" id="keybtn">🔑 AI key</button>
   </nav>
 </div></header>
 <main class="wrap" id="app"></main>
@@ -336,17 +337,31 @@ function simCard(id,c){var S=SIMS[id];if(!S)return'';ui.sv=ui.sv||{};var v=ui.sv
   S.sl.forEach(function(x){if(v[x[0]]===undefined)v[x[0]]=x[6]});
   var sl=S.sl.map(function(x){return'<label>'+esc(x[1])+': <b id="sv-'+x[0]+'">'+v[x[0]]+'</b> '+esc(x[2])+'<input type="range" data-sim="'+id+'" name="'+x[0]+'" min="'+x[3]+'" max="'+x[4]+'" step="'+x[5]+'" value="'+v[x[0]]+'"></label>'}).join('');
   return'<div class="card" style="margin-top:18px;--c:'+c+';border-left:10px solid var(--c)"><h3>Try it: interactive simulation</h3><p class="muted">'+esc(S.h)+'</p><div class="fgrid">'+sl+'</div><div id="simout">'+simOut(id)+'</div></div>'}
-document.addEventListener('input',function(e){var t=e.target;if(!t.dataset)return;if(t.dataset.ans){ui.oans=ui.oans||{};ui.oans[t.dataset.ans]=t.value;return}if(!t.dataset.sim)return;var id=t.dataset.sim;ui.sv[id][t.name]=Number(t.value);document.getElementById('sv-'+t.name).textContent=t.value;document.getElementById('simout').innerHTML=simOut(id)});
+document.addEventListener('input',function(e){var t=e.target;if(t.id==='mk-key'||t.id==='mk-model'){setGK(document.getElementById('mk-key').value.trim(),document.getElementById('mk-model').value.trim());return}
+  if(t.id==='mk-essay'||t.id==='mk-task'){ui.mk=ui.mk||{};ui.mk[t.id==='mk-essay'?'essay':'task']=t.value;return}
+  if(!t.dataset)return;if(t.dataset.ans){ui.oans=ui.oans||{};ui.oans[t.dataset.ans]=t.value;return}if(!t.dataset.sim)return;var id=t.dataset.sim;ui.sv[id][t.name]=Number(t.value);document.getElementById('sv-'+t.name).textContent=t.value;document.getElementById('simout').innerHTML=simOut(id)});
 
 var BK='sec3-bank-v1',bank={};
 try{bank=JSON.parse(localStorage.getItem(BK)||'{}')}catch(e){bank={}}
 function saveBank(){try{localStorage.setItem(BK,JSON.stringify(bank))}catch(e){toast('Storage is full, so the questions could not be saved.')}}
+function getGK(){var k='',m='';try{k=localStorage.getItem(GK)||'';m=localStorage.getItem(GK+'-m')||''}catch(e){}return{k:k||ui.gk||'',m:m||ui.gm||''}}
+function setGK(k,m){ui.gk=k;ui.gm=m;try{localStorage.setItem(GK,k);localStorage.setItem(GK+'-m',m);return true}catch(e){return false}}
 function gem(prompt){
-  var key='',model='gemini-2.5-flash';try{key=localStorage.getItem(GK)||'';model=localStorage.getItem(GK+'-m')||model}catch(e){}
-  if(!key)return Promise.reject(new Error('Add your Gemini API key in the AI Writing Marker tab first.'));
-  return fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',temperature:0.4}})})
-  .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));return JSON.parse(j.candidates[0].content.parts[0].text.replace(/```json|```/g,''))})});
+  var c=getGK(),key=c.k,model=c.m||'gemini-2.5-flash';
+  if(!key)return Promise.reject(new Error('No Gemini API key saved yet. Tap the 🔑 AI key button at the top.'));
+  var url='https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent',
+  body=JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',temperature:0.4}}),
+  go=function(u,h){return fetch(u,{method:'POST',headers:h,body:body})};
+  return go(url,{'Content-Type':'application/json','x-goog-api-key':key})
+  .catch(function(){return go(url+'?key='+encodeURIComponent(key),{'Content-Type':'application/json'})})
+  .catch(function(e){throw new Error('Could not reach Google ('+((e&&e.message)||'network error')+'). A school or work network, a VPN, or an ad blocker may be blocking generativelanguage.googleapis.com.')})
+  .then(function(r){return r.json().then(function(j){
+    if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));
+    var cd=j.candidates&&j.candidates[0];
+    if(!cd||!cd.content)throw new Error('Google returned no answer'+(j.promptFeedback&&j.promptFeedback.blockReason?' ('+j.promptFeedback.blockReason+')':'')+'. Try again.');
+    return JSON.parse(cd.content.parts[0].text.replace(/```json|```/g,''))})});
 }
+
 function ctx(id){return'Singapore Sec 3 G3 '+subj(id.split('-')[0]).name+', topic "'+findTopic(id).name+'"'}
 function validQ(q){return q&&typeof q.q==='string'&&Array.isArray(q.opts)&&q.opts.length===4&&q.ans>=0&&q.ans<=3}
 function qnav(k,i,n){return'<div class="btnrow" style="margin-top:12px"><button class="btn alt small" data-a="qgo" data-k="'+k+'" data-n="'+n+'" data-d="-1">← Previous</button><button class="btn alt small" data-a="qgo" data-k="'+k+'" data-n="'+n+'" data-d="1">Next →</button></div>'}
@@ -356,8 +371,8 @@ function practiceCard(id,c){
   if(busy)return h+'<p style="margin-top:10px">'+esc(ui.gen.msg)+' Please keep this page open.</p></div>';
   var err=ui.genErr&&ui.genErr.id===id?'<div class="warn">'+esc(ui.genErr.msg)+'</div>':'';
   var done=mq.length>=50&&oq.length>=10;
-  var gb='<p style="margin-top:12px"><button class="btn'+(done?' alt small':'')+'" data-a="genq" data-id="'+id+'"'+(done?' data-fresh="1"':'')+'>'+(done?'Make a new set':(mq.length||oq.length?'Finish generating ('+mq.length+'/50 multiple-choice, '+oq.length+'/10 open-ended)':'Generate 50 multiple-choice + 10 open-ended questions'))+'</button></p>';
-  if(!mq.length&&!oq.length)return h+'<p class="muted" style="margin-top:8px">The questions are written by AI with your Gemini key (set it in the AI Writing Marker tab), saved on this device, and take about a minute to make. AI can make mistakes, so check any answer that looks wrong with your teacher.</p>'+err+gb+'</div>';
+  var gb='<p style="margin-top:12px"><button class="btn alt small" data-a="keysheet">'+(getGK().k?'🔑 Change AI key':'🔑 Add AI key first')+'</button> <button class="btn'+(done?' alt small':'')+'" data-a="genq" data-id="'+id+'"'+(done?' data-fresh="1"':'')+'>'+(done?'Make a new set':(mq.length||oq.length?'Finish generating ('+mq.length+'/50 multiple-choice, '+oq.length+'/10 open-ended)':'Generate 50 multiple-choice + 10 open-ended questions'))+'</button></p>';
+  if(!mq.length&&!oq.length)return h+'<p class="muted" style="margin-top:8px">The questions are written by AI with your Gemini key (add it with the 🔑 AI key button), saved on this device, and take about a minute to make. AI can make mistakes, so check any answer that looks wrong with your teacher.</p>'+err+gb+'</div>';
   var tabs='<div class="seg" style="margin-top:12px"><button data-a="pmode" data-id="'+id+'" data-m="mcq" aria-pressed="'+(pm==='mcq')+'">Multiple choice ('+mq.length+')</button><button data-a="pmode" data-id="'+id+'" data-m="open" aria-pressed="'+(pm==='open')+'">Open-ended ('+oq.length+')</button></div>',body='';
   ui.qi=ui.qi||{};
   if(pm==='mcq'&&mq.length){
@@ -479,7 +494,7 @@ topicDetail:function(){
 },
 quizzes:function(){
   return '<div class="hero" style="padding-bottom:0"><h2>MCQ Quizzes</h2><p class="lede">Practice questions live inside each topic.</p></div>'+
-    '<div class="card" style="margin-top:18px"><p>Open any topic guide and scroll to <b>Practice questions</b>. You can generate 50 multiple-choice and 10 open-ended questions for that topic with your Gemini key, which you set in the AI Writing Marker tab.</p></div>';
+    '<div class="card" style="margin-top:18px"><p>Open any topic guide and scroll to <b>Practice questions</b>. You can generate 50 multiple-choice and 10 open-ended questions for that topic with your Gemini key, which you set with the 🔑 AI key button at the top.</p></div>';
 },
 vocab:function(){
   var emoHtml=VOCAB_DATA.emotions.map(function(e){
@@ -539,8 +554,7 @@ time:function(){
     (rows?'<h3 style="margin-top:26px">Recent sessions</h3><ul class="list">'+rows+'</ul>':'');
 },
 marker:function(){
-  var m=ui.mk=ui.mk||{},key='',mod='gemini-2.5-flash';
-  try{key=localStorage.getItem(GK)||'';mod=m.model||localStorage.getItem(GK+'-m')||mod}catch(e){}
+  var m=ui.mk=ui.mk||{},c=getGK(),key=c.k,mod=m.model||c.m||'gemini-2.5-flash';
   var types=[['English: Situational writing (30 marks)','English situational writing (email, letter or report)|30'],['English: Continuous writing (40 marks)','English continuous writing (narrative, descriptive, expository or argumentative)|40'],['Chinese 应用文 (20 marks)','Chinese 应用文 functional writing|20'],['Chinese 作文 (40 marks)','Chinese 作文 composition|40']];
   var opts=types.map(function(t){return'<option value="'+esc(t[1])+'"'+(m.type===t[1]?' selected':'')+'>'+esc(t[0])+'</option>'}).join('');
   var r=m.res,out='';
@@ -551,8 +565,8 @@ marker:function(){
     ((r.corrections&&r.corrections.length)?'<h3 style="margin-top:12px">Corrections</h3><ul>'+r.corrections.map(function(c){return'<li>'+esc(c.original)+' → <b>'+esc(c.better)+'</b><br><span class="muted">'+esc(c.why)+'</span></li>'}).join('')+'</ul>':'')+
     '<p class="note">This is an AI estimate to help you practise. It is not official MOE or teacher marking.</p></div>';
   return'<div class="hero" style="padding-bottom:0"><h2>AI Writing Marker</h2><p class="lede">Paste your English or Chinese writing and Gemini will give an estimated score, strengths and what to fix.</p></div>'+
-    '<div class="card" style="margin-top:18px"><div class="fgrid"><label>Writing type<select id="mk-type">'+opts+'</select></label><label>Gemini API key<input id="mk-key" type="password" autocomplete="off" value="'+esc(key)+'"></label><label>Model<input id="mk-model" value="'+esc(mod)+'"></label></div>'+
-    '<p class="note" style="margin-top:8px">Get a free key at aistudio.google.com. It is saved only in this browser and sent only to Google.</p>'+
+    '<div class="card" style="margin-top:18px"><div class="fgrid"><label>Writing type<select id="mk-type">'+opts+'</select></label><label>Gemini API key<input id="mk-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your key here" value="'+esc(key)+'"></label><label>Model<input id="mk-model" value="'+esc(mod)+'"></label></div>'+
+    '<p style="margin-top:12px"><button class="btn small" data-a="testkey">Save and test key</button> <button class="btn alt small" data-a="pastekey">Paste from clipboard</button> <button class="btn alt small" data-a="promptkey">Enter key in a pop-up</button></p><p id="keymsg" class="note" role="status" style="margin-top:6px"></p><p class="note" style="margin-top:8px">Get a free key at aistudio.google.com. It is saved only in this browser and sent only to Google.</p>'+
     '<label style="margin-top:12px">Question or task (optional)<textarea id="mk-task" style="min-height:60px">'+esc(m.task||'')+'</textarea></label>'+
     '<label style="margin-top:12px">Your writing<textarea id="mk-essay" style="min-height:220px;font-family:var(--body);font-size:1rem">'+esc(m.essay||'')+'</textarea></label>'+
     '<p style="margin-top:12px"><button class="btn" data-a="mark">Score my writing</button></p></div>'+out;
@@ -616,6 +630,27 @@ var actions={
   },
   reset:function(){if(!ui.confirmReset){ui.confirmReset=true;render();return}state=blank();save();ui.confirmReset=false;ui.exportText='';toast('All data deleted.');go('map')},
   cancelreset:function(){ui.confirmReset=false;render()},
+  pastekey:function(){var o=document.getElementById('keymsg');
+    if(!navigator.clipboard||!navigator.clipboard.readText){o.textContent='Your browser blocks clipboard access here. Use the pop-up button instead.';return}
+    navigator.clipboard.readText().then(function(t){t=(t||'').trim();if(!t){o.textContent='The clipboard is empty. Copy your key first.';return}document.getElementById('mk-key').value=t;setGK(t,document.getElementById('mk-model').value.trim());o.textContent='Key pasted and saved. Now tap Save and test key.'},function(){o.textContent='Clipboard access was blocked. Use the pop-up button instead.'})},
+  promptkey:function(){var o=document.getElementById('keymsg'),t;try{t=window.prompt('Paste your Gemini API key')}catch(e){t=null}
+    if(t===null||t===undefined){o.textContent='No pop-up appeared or it was cancelled. If you are viewing this inside a preview window, open the file in Chrome or Safari instead.';return}
+    t=t.trim();if(!t)return;document.getElementById('mk-key').value=t;setGK(t,document.getElementById('mk-model').value.trim());o.textContent='Key saved. Now tap Save and test key.'},
+  keysheet:function(){var c=getGK();
+    document.getElementById('sheet').innerHTML='<div class="sheet"><div class="card" role="dialog" aria-label="Gemini API key"><h3>Gemini API key</h3><p class="note" style="margin-top:6px">Get a free key at aistudio.google.com. It is saved only in this browser.</p><label style="margin-top:12px">Key<input id="sk-key" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste your key here" value="'+esc(c.k)+'"></label><label style="margin-top:10px">Model<input id="sk-model" value="'+esc(c.m||'gemini-2.5-flash')+'"></label><p id="sk-msg" class="note" role="status">'+(c.k?'A key is saved on this device.':'No key saved yet.')+'</p><div class="btnrow"><button class="btn" data-a="skgo">Save and test</button><button class="btn alt" data-a="closesheet">Close</button></div></div></div>';
+    document.getElementById('sk-key').focus()},
+  skgo:function(){var k=document.getElementById('sk-key').value.trim(),m=document.getElementById('sk-model').value.trim()||'gemini-2.5-flash',o=document.getElementById('sk-msg');
+    if(!k){o.textContent='Paste your key into the box first.';return}
+    var ok=setGK(k,m);o.textContent='Testing…';
+    gem('Reply with this JSON only: {"ok":true}').then(function(){var x=document.getElementById('sk-msg');if(x)x.textContent='Key saved and working. You can close this.'+(ok?'':' (This browser blocks storage, so it is only kept until you close the page.)')})
+    .catch(function(e){var x=document.getElementById('sk-msg');if(x)x.textContent='Key saved, but the test failed: '+String(e.message||e)})},
+  testkey:function(){
+    var k=document.getElementById('mk-key').value.trim(),m=document.getElementById('mk-model').value.trim()||'gemini-2.5-flash',o=document.getElementById('keymsg');
+    if(!k){o.textContent='Paste your key into the box first.';return}
+    var ok=setGK(k,m);o.textContent='Testing…';
+    gem('Reply with this JSON only: {"ok":true}').then(function(){o.textContent='Key works.'+(ok?' It is saved on this device.':' This browser is blocking storage, so it is only kept until you close the page.')})
+    .catch(function(e){var x=document.getElementById('keymsg');if(x)x.textContent='Test failed: '+String(e.message||e)+(ok?' (Your key is saved. If the message mentions the model, change the Model box.)':'')});
+  },
   pmode:function(d){(ui.pm=ui.pm||{})[d.id]=d.m;render()},
   qgo:function(d){ui.qi=ui.qi||{};ui.qi[d.k]=Math.max(0,Math.min(Number(d.n)-1,(ui.qi[d.k]||0)+Number(d.d)));render()},
   oreveal:function(d){ui.orev[d.k]=true;render()},
@@ -659,14 +694,12 @@ var actions={
     var g=function(i){return document.getElementById(i).value.trim()};
     var essay=g('mk-essay'),key=g('mk-key'),model=g('mk-model')||'gemini-2.5-flash',ty=g('mk-type'),tk=g('mk-task'),o=ty.split('|');
     ui.mk={task:tk,essay:essay,type:ty,model:model};
-    if(essay.length<40){toast('Paste your writing first.');render();return}
-    if(!key){toast('Add your Gemini API key first.');render();return}
-    try{localStorage.setItem(GK,key);localStorage.setItem(GK+'-m',model)}catch(e){}
+    if(key)setGK(key,model);
+    if(!key&&!getGK().k){toast('Add your Gemini API key first.');return}
+    if(essay.length<40){toast('Paste your writing first.');return}
     ui.mk.busy=true;render();
     var prompt='You are a strict but encouraging Singapore secondary school marker. Mark this '+o[0]+' for a Sec 3 G3 student, out of '+o[1]+' marks, using a typical O-Level style rubric (content/task fulfilment and organisation, and language/accuracy). '+(tk?'Task: '+tk+'\n':'')+'Writing:\n'+essay+'\n\nReply with JSON only: {"score":number,"total":'+o[1]+',"band":"short band description","summary":"2 sentences","strengths":["..."],"improvements":["..."],"corrections":[{"original":"quote from writing","better":"corrected version","why":"short reason"}]}. Give 3 strengths, 3 improvements and up to 5 corrections. Write feedback in English, quoting Chinese where needed.';
-    fetch('https://generativelanguage.googleapis.com/v1beta/models/'+encodeURIComponent(model)+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',temperature:0.3}})})
-    .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error((j.error&&j.error.message)||('HTTP '+r.status));return j})})
-    .then(function(j){ui.mk.res=JSON.parse(j.candidates[0].content.parts[0].text.replace(/```json|```/g,''))})
+    gem(prompt).then(function(r){ui.mk.res=r})
     .catch(function(e){ui.mk.err=String(e.message||e)})
     .then(function(){ui.mk.busy=false;if(ui.tab==='marker')render()});
   }
